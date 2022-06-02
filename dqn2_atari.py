@@ -6,11 +6,11 @@ import time
 
 import os
 import gym
-from PIL import Image
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions import Categorical
 from torchvision import transforms
 
 class ReplayMemory:
@@ -58,36 +58,48 @@ class DQN:
         self.device = args.device
         self.batch_size = args.batch_size
         self.gamma = args.gamma
+        self.alpha = args.alpha
         self.freq = args.freq
         self.target_freq = args.target_freq
 
-    def select_action(self, state, epsilon, action_space):
+    def select_action(self, state, action_space):
         with torch.no_grad():
-            if random.random() < epsilon:
-                return action_space.sample()
-            else:
-                state = torch.tensor(np.array([state]), dtype=torch.float, device=self.device)
-                out = self._behavior_net(state)
-                action = torch.argmax(out)
-                return int(action)
+            state = torch.tensor(np.array([state]), dtype=torch.float, device=self.device)
+            Q_value = self._behavior_net(state)
+            policy = F.softmax(Q_value / self.alpha, 1)
+            m = Categorical(policy)
+            action = m.sample()
+            return int(action)
 
     def append(self, state, action, reward, next_state, done):
-        self._memory.append(state, [action], [reward], next_state, [int(done)])
+        self._memory.append(state, [action], [reward / 10], next_state, [int(done)])
 
     def update(self, total_steps):
         if total_steps % self.freq == 0:
-            self._update_behavior_network(self.gamma)
+            self._update_behavior_network()
         if total_steps % self.target_freq == 0:
             self._update_target_network()
 
-    def _update_behavior_network(self, gamma):
+    def calculate_q_value(self, Q_value, policy, action):
+        entropy = -torch.sum(policy * torch.log(policy + 1e-8), 1).reshape(self.batch_size, 1)
+        value = torch.sum(policy * Q_value, 1).reshape(self.batch_size, 1)
+        pi = policy.gather(1, action.long())
+        return self.alpha * (torch.log(pi + 1e-8) + entropy) + value
+
+    def _update_behavior_network(self):
         state, action, reward, next_state, done = self._memory.sample(self.batch_size, self.device)
 
         self._optimizer.zero_grad()
-        q_value = self._behavior_net(state).gather(1, action.long())
+        Q_value = self._behavior_net(state)
+        policy = F.softmax(Q_value / self.alpha, 1)
+        q_value = self.calculate_q_value(Q_value, policy, action)
+        
         with torch.no_grad():
-            q_next = torch.max(self._target_net(next_state), dim=1)[0].reshape(self.batch_size, 1)
-            q_target = reward + gamma * q_next * (1 - done)
+            Q_next = self._behavior_net(next_state).gather(1, action.long())        
+            policy_next = F.softmax(Q_next / self.alpha, 1)
+            action_next = torch.argmax(policy_next, 1).reshape(self.batch_size, 1)
+            q_next = self.calculate_q_value(Q_next, policy_next, action_next)
+            q_target = reward + self.gamma * q_next * (1 - done)
 
         mse_criterion = nn.MSELoss()
         loss = mse_criterion(q_value, q_target)
@@ -134,7 +146,6 @@ def train(args, env, agent):
     action_space = env.action_space
     start_episode = 0
     total_steps = 0
-    epsilon = args.epsilon
     ewma_reward = 0
     best_ewma_reward =0
     accumulate_time = 0
@@ -154,7 +165,7 @@ def train(args, env, agent):
         state = process(state)
         for t in itertools.count(start=1):
 
-            action = agent.select_action(state, epsilon, action_space)
+            action = agent.select_action(state, action_space)
             
             next_state, reward, done, _ = env.step(action)
             next_state = process(next_state)
@@ -178,7 +189,7 @@ def train(args, env, agent):
                     'total_steps': total_steps,
                     'ewma_reward': ewma_reward,
                     'best_ewma_reward': best_ewma_reward,
-                    'accumulate_time': time.time()-start_time+accumulate_time,
+                    'accumulate_time': time.time()-start_time+accumulate_time
                 }
                 agent.save(args, checkpoint=True, data=data)
 
@@ -196,15 +207,17 @@ def train(args, env, agent):
 def test(args, env, agent):
     print('Start Testing')
     action_space = env.action_space
-    epsilon = args.test_epsilon
 
     rewards = list()
     for n_episode in range(args.test_episode):
         total_reward = 0
         state = env.reset()
+        state = process(state)
         for t in itertools.count(start=1):
-            action = agent.select_action(state, epsilon, action_space)
+            action = agent.select_action(state, action_space)
+
             next_state, reward, done, _ = env.step(action)
+            next_state = process(next_state)
 
             state = next_state
             total_reward += reward
@@ -220,26 +233,25 @@ def main():
     ## arguments ##
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--device', default='cuda')
-    parser.add_argument('-e', '--env_name', default='CartPole-v1')
+    parser.add_argument('-e', '--env_name', default='Assault')
     parser.add_argument('--checkpoint', action='store_true')
     parser.add_argument('--render', action='store_true')
     # train
     parser.add_argument('--train', action='store_true')
-    parser.add_argument('--max_step', default=2000000, type=int)
+    parser.add_argument('--max_step', default=10000000, type=int)
     parser.add_argument('--capacity', default=100000, type=int)
     parser.add_argument('--batch_size', default=32, type=int)
+    parser.add_argument('--alpha', default=.1, type=float)
     parser.add_argument('--lr', default=.0005, type=float)
-    parser.add_argument('--epsilon', default=.005, type=float)
     parser.add_argument('--gamma', default=.99, type=float)
     parser.add_argument('--freq', default=10, type=int)
     parser.add_argument('--target_freq', default=1000, type=int)
     # test
     parser.add_argument('--test', action='store_true')
-    parser.add_argument('--test_epsilon', default=.001, type=float)
     parser.add_argument('--test_episode', default=10, type=int)
     args = parser.parse_args()
 
-    args.algo_name = 'dqn'
+    args.algo_name = 'dqn2'
 
     ## create dirs
     os.makedirs('model', exist_ok=True)
