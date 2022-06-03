@@ -20,6 +20,7 @@ def get_args():
     parser.add_argument('--tau', default=1.0, type=float, help='generalized advantage estimation discount')
     parser.add_argument('--horizon', default=0.95, type=float, help='horizon for running averages')
     parser.add_argument('--hidden', default=256, type=int, help='hidden size of GRU')
+    parser.add_argument('--alpha', default=.1, type=float, help='parameter of entropy regularization')
     return parser.parse_args()
 
 discount = lambda x, gamma: lfilter([1],[1,-gamma],x[::-1])[::-1] # discounted rewards one liner
