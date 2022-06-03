@@ -23,9 +23,9 @@ def get_args():
     parser.add_argument('--tau', default=1.0, type=float, help='generalized advantage estimation discount')
     parser.add_argument('--horizon', default=0.99, type=float, help='horizon for running averages')
     parser.add_argument('--hidden', default=256, type=int, help='hidden size of GRU')
-    parser.add_argument('--capacity', default=100000, type=int, help='capacity for replay buffer')
+    parser.add_argument('--capacity', default=10000, type=int, help='capacity for replay buffer')
     parser.add_argument('--batch_size', default=32, type=int, help='batch size for replay buffer')
-    parser.add_argument('--freq', default=4, type=int, help='update frequency for q learning')
+    parser.add_argument('--freq', default=10, type=int, help='update frequency for q learning')
     parser.add_argument('--alpha', default=.1, type=float, help='parameter of entropy regularization')
     return parser.parse_args()
 

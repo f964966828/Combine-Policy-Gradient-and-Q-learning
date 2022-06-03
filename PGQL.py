@@ -23,7 +23,7 @@ def get_args():
     parser.add_argument('--tau', default=1.0, type=float, help='generalized advantage estimation discount')
     parser.add_argument('--horizon', default=0.99, type=float, help='horizon for running averages')
     parser.add_argument('--hidden', default=256, type=int, help='hidden size of GRU')
-    parser.add_argument('--capacity', default=100000, type=int, help='capacity for replay buffer')
+    parser.add_argument('--capacity', default=10000, type=int, help='capacity for replay buffer')
     parser.add_argument('--batch_size', default=32, type=int, help='batch size for replay buffer')
     parser.add_argument('--alpha', default=.1, type=float, help='parameter of entropy regularization')
     return parser.parse_args()
@@ -215,11 +215,11 @@ def train(shared_model, shared_optimizer, rank, args, info, memory):
 if __name__ == "__main__":
 
     args = get_args()
-    args.save_dir = './Q-learning/{}/'.format(args.env.lower()) # keep the directory structure simple
+    args.save_dir = './PGQL/{}/'.format(args.env.lower()) # keep the directory structure simple
     if args.render:  args.processes = 1 ; args.test = True # render mode -> test mode w one process
     if args.test:  args.lr = 0 # don't train in render mode
     args.num_actions = gym.make(args.env).action_space.n # get the action space of this game
-    os.makedirs('./Q-learning', exist_ok=True) # make dir to save
+    os.makedirs('./PGQL', exist_ok=True) # make dir to save
     os.makedirs(args.save_dir, exist_ok=True) # make dir to save models etc.
 
     torch.manual_seed(args.seed)
