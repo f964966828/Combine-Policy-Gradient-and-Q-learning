@@ -18,7 +18,7 @@ def get_args():
     parser.add_argument('--seed', default=1, type=int, help='seed random # generators (for reproducibility)')
     parser.add_argument('--gamma', default=0.99, type=float, help='rewards discount factor')
     parser.add_argument('--tau', default=1.0, type=float, help='generalized advantage estimation discount')
-    parser.add_argument('--horizon', default=0.99, type=float, help='horizon for running averages')
+    parser.add_argument('--horizon', default=0.95, type=float, help='horizon for running averages')
     parser.add_argument('--hidden', default=256, type=int, help='hidden size of GRU')
     return parser.parse_args()
 
@@ -89,7 +89,8 @@ def cost_func(args, values, logps, actions, rewards):
     discounted_r = torch.tensor(discounted_r.copy(), dtype=torch.float32)
     value_loss = .5 * (discounted_r - values[:-1,0]).pow(2).sum()
 
-    return policy_loss + 0.5 * value_loss
+    entropy_loss = (-logps * torch.exp(logps)).sum() # entropy definition, for entropy regularization
+    return policy_loss + 0.5 * value_loss - args.alpha * entropy_loss
 
 def train(shared_model, shared_optimizer, rank, args, info):
     env = gym.make(args.env) # make a local (unshared) environment
@@ -157,11 +158,11 @@ def train(shared_model, shared_optimizer, rank, args, info):
 if __name__ == "__main__":
 
     args = get_args()
-    args.save_dir = './A3C/{}/'.format(args.env.lower()) # keep the directory structure simple
+    args.save_dir = './{}/A3C/'.format(args.env.lower()) # keep the directory structure simple
     if args.render:  args.processes = 1 ; args.test = True # render mode -> test mode w one process
     if args.test:  args.lr = 0 # don't train in render mode
     args.num_actions = gym.make(args.env).action_space.n # get the action space of this game
-    os.makedirs('./A3C', exist_ok=True) # make dir to save
+    os.makedirs('./{}/'.format(args.env.lower()), exist_ok=True) # make dir to save
     os.makedirs(args.save_dir, exist_ok=True) # make dir to save models etc.
 
     torch.manual_seed(args.seed)

@@ -21,9 +21,9 @@ def get_args():
     parser.add_argument('--seed', default=1, type=int, help='seed random # generators (for reproducibility)')
     parser.add_argument('--gamma', default=0.99, type=float, help='rewards discount factor')
     parser.add_argument('--tau', default=1.0, type=float, help='generalized advantage estimation discount')
-    parser.add_argument('--horizon', default=0.99, type=float, help='horizon for running averages')
+    parser.add_argument('--horizon', default=0.95, type=float, help='horizon for running averages')
     parser.add_argument('--hidden', default=256, type=int, help='hidden size of GRU')
-    parser.add_argument('--capacity', default=10000, type=int, help='capacity for replay buffer')
+    parser.add_argument('--capacity', default=50000, type=int, help='capacity for replay buffer')
     parser.add_argument('--batch_size', default=32, type=int, help='batch size for replay buffer')
     parser.add_argument('--alpha', default=.1, type=float, help='parameter of entropy regularization')
     return parser.parse_args()
@@ -109,7 +109,8 @@ def cost_func(args, values, logps, actions, rewards):
     discounted_r = torch.tensor(discounted_r.copy(), dtype=torch.float32)
     value_loss = .5 * (discounted_r - values[:-1,0]).pow(2).sum()
 
-    return policy_loss + 0.5 * value_loss
+    entropy_loss = (-logps * torch.exp(logps)).sum() # entropy definition, for entropy regularization
+    return policy_loss + 0.5 * value_loss - args.alpha * entropy_loss
 
 def update_shared_model(shared_model, shared_optimizer, model, loss):
     shared_optimizer.zero_grad() ; loss.backward()
@@ -119,23 +120,23 @@ def update_shared_model(shared_model, shared_optimizer, model, loss):
         if shared_param.grad is None: shared_param._grad = param.grad # sync gradients with shared model
     shared_optimizer.step()
 
-def calculate_q_value(value, policy, action, args):
-    entropy = -torch.sum(policy * torch.log(policy + 1e-8), 1).reshape(args.batch_size, 1)
-    pi = policy.gather(1, action.long())
-    return args.alpha * (torch.log(pi + 1e-8) + entropy) + value
+def calculate_q_value(value, logp, action, args):
+    entropy = -torch.sum(torch.exp(logp) * logp, 1).reshape(args.batch_size, 1)
+    logpi = logp.gather(1, action.long())
+    return args.alpha * (logpi + entropy) + value
 
 def q_update(shared_model, shared_optimizer, model, args, memory):
     state, action, reward, next_state, done, hx = memory.sample(args.batch_size)
     
     value, logit, nhx = model((state, hx))
-    policy = torch.exp(F.log_softmax(logit, dim=-1))
-    q_value = calculate_q_value(value, policy, action, args)
+    logp = F.log_softmax(logit, dim=-1)
+    q_value = calculate_q_value(value, logp, action, args)
 
     with torch.no_grad():
         value_next, logit_next, _ = model((next_state, nhx))
-        policy_next = torch.exp(F.log_softmax(logit_next, dim=-1))
-        action_next = torch.argmax(policy_next, 1).reshape(args.batch_size, 1)
-        q_next = calculate_q_value(value_next, policy_next, action_next, args)
+        logp_next = F.log_softmax(logit_next, dim=-1)
+        action_next = torch.argmax(logp_next, 1).reshape(args.batch_size, 1)
+        q_next = calculate_q_value(value_next, logp_next, action_next, args)
         q_target = reward + args.gamma * q_next * (1 - done)
     
     mse_criterion = nn.MSELoss()
@@ -215,11 +216,11 @@ def train(shared_model, shared_optimizer, rank, args, info, memory):
 if __name__ == "__main__":
 
     args = get_args()
-    args.save_dir = './PGQL/{}/'.format(args.env.lower()) # keep the directory structure simple
+    args.save_dir = './{}/PGQL/'.format(args.env.lower()) # keep the directory structure simple
     if args.render:  args.processes = 1 ; args.test = True # render mode -> test mode w one process
     if args.test:  args.lr = 0 # don't train in render mode
     args.num_actions = gym.make(args.env).action_space.n # get the action space of this game
-    os.makedirs('./PGQL', exist_ok=True) # make dir to save
+    os.makedirs('./{}/'.format(args.env.lower()), exist_ok=True) # make dir to save
     os.makedirs(args.save_dir, exist_ok=True) # make dir to save models etc.
 
     torch.manual_seed(args.seed)
