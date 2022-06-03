@@ -153,7 +153,7 @@ def train(shared_model, shared_optimizer, rank, args, info, memory):
     start_time = last_disp_time = time.time()
     episode_length, epr, eploss, done  = 0, 0, 0, True # bookkeeping
 
-    while info['frames'][0] <= 8e7 or args.test: # openai baselines uses 40M frames...we'll use 80M
+    while info['frames'][0] <= 2e7 or args.test: # training 20M steps
         model.load_state_dict(shared_model.state_dict()) # sync with shared model
 
         hx = torch.zeros(1, 256) if done else hx.detach()  # rnn activation vector
@@ -178,7 +178,7 @@ def train(shared_model, shared_optimizer, rank, args, info, memory):
             hx = nhx
 
             info['frames'].add_(1) ; num_frames = int(info['frames'].item())
-            if num_frames % 2e6 == 0: # save every 2M frames
+            if num_frames % 1e6 == 0: # save every 1M frames
                 printlog(args, '\n\t{:.0f}M frames: saved model\n'.format(num_frames/1e6))
                 torch.save(shared_model.state_dict(), args.save_dir+'model.{:.0f}.tar'.format(num_frames/1e6))
 
