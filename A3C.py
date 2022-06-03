@@ -91,7 +91,7 @@ def cost_func(args, values, logps, actions, rewards):
     value_loss = .5 * (discounted_r - values[:-1,0]).pow(2).sum()
 
     entropy_loss = (-logps * torch.exp(logps)).sum() # entropy definition, for entropy regularization
-    return policy_loss + 0.5 * value_loss - args.alpha * entropy_loss
+    return policy_loss + 0.5 * value_loss - 0.01 * entropy_loss
 
 def train(shared_model, shared_optimizer, rank, args, info):
     env = gym.make(args.env) # make a local (unshared) environment
