@@ -13,7 +13,7 @@ os.environ['OMP_NUM_THREADS'] = '1'
 def get_args():
     parser = argparse.ArgumentParser(description=None)
     parser.add_argument('--env', default='Breakout-v4', type=str, help='gym environment')
-    parser.add_argument('--processes', default=15, type=int, help='number of processes to train with')
+    parser.add_argument('--processes', default=10, type=int, help='number of processes to train with')
     parser.add_argument('--render', default=False, type=bool, help='renders the atari environment')
     parser.add_argument('--test', default=False, type=bool, help='sets lr=0, chooses most likely actions')
     parser.add_argument('--rnn_steps', default=20, type=int, help='steps to train LSTM over')
@@ -25,7 +25,6 @@ def get_args():
     parser.add_argument('--hidden', default=256, type=int, help='hidden size of GRU')
     parser.add_argument('--capacity', default=10000, type=int, help='capacity for replay buffer')
     parser.add_argument('--batch_size', default=32, type=int, help='batch size for replay buffer')
-    parser.add_argument('--freq', default=10, type=int, help='update frequency for q learning')
     parser.add_argument('--alpha', default=.1, type=float, help='parameter of entropy regularization')
     return parser.parse_args()
 
@@ -120,23 +119,23 @@ def update_shared_model(shared_model, shared_optimizer, model, loss):
         if shared_param.grad is None: shared_param._grad = param.grad # sync gradients with shared model
     shared_optimizer.step()
 
-def calculate_q_value(value, logp, action, args):
-    entropy = -torch.sum(torch.exp(logp) * logp, 1).reshape(args.batch_size, 1)
-    logpi = logp.gather(1, action.long())
-    return args.alpha * (logpi + entropy) + value
+def calculate_q_value(value, policy, action, args):
+    entropy = -torch.sum(policy * torch.log(policy + 1e-8), 1).reshape(args.batch_size, 1)
+    pi = policy.gather(1, action.long())
+    return args.alpha * (torch.log(pi + 1e-8) + entropy) + value
 
 def q_update(shared_model, shared_optimizer, model, args, memory):
     state, action, reward, next_state, done, hx = memory.sample(args.batch_size)
     
     value, logit, nhx = model((state, hx))
-    logp = F.log_softmax(logit, dim=-1)
-    q_value = calculate_q_value(value, logp, action, args)
+    policy = torch.exp(F.log_softmax(logit, dim=-1))
+    q_value = calculate_q_value(value, policy, action, args)
 
     with torch.no_grad():
         value_next, logit_next, _ = model((next_state, nhx))
-        logp_next = F.log_softmax(logit_next, dim=-1)
-        action_next = torch.argmax(logp_next, 1).reshape(args.batch_size, 1)
-        q_next = calculate_q_value(value_next, logp_next, action_next, args)
+        policy_next = torch.exp(F.log_softmax(logit_next, dim=-1))
+        action_next = torch.argmax(policy_next, 1).reshape(args.batch_size, 1)
+        q_next = calculate_q_value(value_next, policy_next, action_next, args)
         q_target = reward + args.gamma * q_next * (1 - done)
     
     mse_criterion = nn.MSELoss()
